@@ -11,10 +11,11 @@ module Main where
 
 import qualified Control.Foldl as Foldl
 import           Control.Concurrent.Async (forConcurrently_, mapConcurrently)
+import           Control.Monad.Except
 import qualified Data.Aeson as Aeson
 import           Data.Aeson.Types (fieldLabelModifier)
 import           Data.Aeson.Encode.Pretty
-import           Data.Foldable (fold, foldMap, traverse_)
+import           Data.Foldable (fold, foldMap, traverse_, for_)
 import qualified Data.Bifunctor as Bifunctor
 import qualified Data.Graph as G
 import           Data.List (maximumBy)
@@ -37,11 +38,15 @@ import qualified Options.Applicative as Opts
 import qualified Paths_psc_package as Paths
 import           System.Environment (getArgs)
 import qualified System.IO as IO
+import           System.FilePath.Glob (glob)
 import qualified System.Process as Process
 import qualified Text.ParserCombinators.ReadP as Read
 import           Turtle hiding (arg, fold, s, x)
 import qualified Turtle
 import           Types (PackageName, mkPackageName, runPackageName, untitledPackageName, preludePackageName)
+import Filesystem.Path.CurrentOS (encodeString)
+import qualified Language.PureScript as P
+import qualified Language.PureScript.Ide.Imports as PIDE
 
 echoT :: Text -> IO ()
 echoT = Turtle.printf (Turtle.s % "\n")
@@ -611,6 +616,9 @@ main = do
         , Opts.command "format"
             (Opts.info (pure formatPackageFile)
             (Opts.progDesc "Format the packages.json file for consistency"))
+        , Opts.command "lint"
+            (Opts.info (pure testLint)
+            (Opts.progDesc "Format the packages.json file for consistency"))
         ]
       where
         pkg = Opts.strArgument $
@@ -650,3 +658,66 @@ main = do
         after = Opts.strOption $
              Opts.long "after"
           <> Opts.help "Skip packages before this package during verification"
+
+
+-- Lint
+
+type Modulename = Text
+type PackageModuleMap = Map.Map Modulename PackageName
+
+testLint :: IO ()
+testLint = do
+  packageSet <- readPackageSet =<< readPackageFile
+  let packages = Map.keys packageSet
+  db <- packageModuleMap packageSet
+  for_ packages $ \pn -> do
+    calculatedDeps <- Set.delete pn <$> dependenciesForPackage db pn
+    let specifiedDeps = Set.fromList $ dependencies (packageSet Map.! pn)
+    let superfluousDeps = specifiedDeps Set.\\ calculatedDeps
+    unless (Set.null superfluousDeps) $ do
+      echoT ("Superfluous deps for package: " <> runPackageName pn)
+      print superfluousDeps
+
+
+sourcesForPackage :: PackageName -> IO [Prelude.FilePath]
+sourcesForPackage package = do
+  pkgC <- readPackageFile
+  db <- readPackageSet pkgC
+  let
+    Just packageInfo = Map.lookup package db
+    path = ".psc-package"
+      </> fromText (set pkgC)
+      </> fromText (runPackageName package)
+      </> fromText (version packageInfo)
+      </> "src" </> "**" </> "*.purs"
+  glob (encodeString path)
+
+modulesInPackage :: PackageName -> IO [(P.ModuleName, [P.ModuleName])]
+modulesInPackage package = do
+  paths <- sourcesForPackage package
+  modules <- runExceptT $ traverse PIDE.parseImportsFromFile paths
+  case modules of
+    Left parseError -> error (show parseError)
+    Right ms -> pure $ map (Bifunctor.second (map (\(x, _, _) -> x))) ms
+
+modulenamesInPackage :: PackageName -> IO (Set.Set Modulename)
+modulenamesInPackage package = do
+  ms <- modulesInPackage package
+  pure $ Set.fromList $ map (P.runModuleName . fst) ms
+
+importsInPackage :: PackageName -> IO (Set.Set Modulename)
+importsInPackage package = do
+  ms <- modulesInPackage package
+  pure $ Set.fromList $ filter (not . T.isPrefixOf "Prim") $ map P.runModuleName $ concatMap snd ms
+
+packageModuleMap :: PackageSet -> IO PackageModuleMap
+packageModuleMap db = do
+  xs <- for (Map.keys db) (\k -> do
+    modules <- modulenamesInPackage k
+    pure (map (,k) (Set.toList modules)))
+  pure (Map.fromList (concat xs))
+
+dependenciesForPackage :: PackageModuleMap -> PackageName -> IO (Set.Set PackageName)
+dependenciesForPackage db package = do
+  imports <- importsInPackage package
+  pure (Set.map (\k -> fromMaybe (error (show k)) (Map.lookup k db)) imports)

@@ -18,13 +18,16 @@ executable psc-package
                    aeson -any,
                    aeson-pretty -any,
                    async >= 2.1.1,
+                   Glob,
                    bytestring -any,
+                   mtl -any,
                    containers -any,
                    foldl -any,
                    optparse-applicative -any,
                    process -any,
                    system-filepath -any,
                    text -any,
+                   purescript -any,
                    turtle <1.6
     main-is: Main.hs
     other-modules: Paths_psc_package

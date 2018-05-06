@@ -1,5 +1,9 @@
-resolver: lts-11.1
+resolver: lts-10.3
 packages:
 - '.'
+- location: '../purescript'
+  extra-dep: true
 extra-deps:
 - aeson-pretty-0.8.5 # newer in lts-11.1 needed for formatting packages.json
+- ansi-terminal-0.7.1.1
+- pipes-http-1.0.5
