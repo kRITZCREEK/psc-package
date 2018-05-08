@@ -581,6 +581,9 @@ main = do
         , Opts.command "install"
             (Opts.info (install <$> optional pkg Opts.<**> Opts.helper)
             (Opts.progDesc "Install/update the named package and add it to 'depends' if not already listed. If no package is specified, install/update all dependencies."))
+        , Opts.command "install-all"
+            (Opts.info (pure installAll)
+            (Opts.progDesc "Install all packages available in the package set."))
         , Opts.command "build"
             (Opts.info (exec ["purs", "compile"]
                         <$> onlyDeps "Compile only the package's dependencies"
@@ -660,6 +663,15 @@ main = do
              Opts.long "after"
           <> Opts.help "Skip packages before this package during verification"
 
+-- Install All
+
+installAll :: IO ()
+installAll = do
+  pkgC <- readPackageFile
+  getPackageSet pkgC
+  packageSet <- readPackageSet pkgC
+  let packages = Map.toList packageSet
+  forConcurrently_ packages . uncurry $ performInstall $ set pkgC
 
 -- Lint
 
