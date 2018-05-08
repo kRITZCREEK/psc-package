@@ -21,6 +21,7 @@ import qualified Data.Graph as G
 import           Data.List (maximumBy)
 import qualified Data.List as List
 import qualified Data.Map as Map
+import qualified Data.IORef as IORef
 import           Data.Maybe (fromMaybe, mapMaybe)
 import           Data.Ord (comparing)
 import qualified Data.Set as Set
@@ -667,17 +668,27 @@ type PackageModuleMap = Map.Map Modulename PackageName
 
 testLint :: IO ()
 testLint = do
-  packageSet <- readPackageSet =<< readPackageFile
+  pkgC <- readPackageFile
+  packageSet <- readPackageSet pkgC
   let packages = Map.keys packageSet
   db <- packageModuleMap packageSet
+  pkgSet <- IORef.newIORef packageSet
+
   for_ packages $ \pn -> do
     calculatedDeps <- Set.delete pn <$> dependenciesForPackage db pn
     let specifiedDeps = Set.fromList $ dependencies (packageSet Map.! pn)
     let superfluousDeps = specifiedDeps Set.\\ calculatedDeps
+    let missingDeps = calculatedDeps Set.\\ specifiedDeps
     unless (Set.null superfluousDeps) $ do
       echoT ("Superfluous deps for package: " <> runPackageName pn)
       print superfluousDeps
+    unless (Set.null missingDeps) $ do
+      echoT ("Missing deps for package: " <> runPackageName pn)
+      print (map runPackageName (Set.toList missingDeps))
+    IORef.modifyIORef pkgSet (\ps -> Map.update (\c -> Just (c { dependencies = Set.toList calculatedDeps})) pn ps)
 
+  result <- IORef.readIORef pkgSet
+  writePackageSet pkgC result
 
 sourcesForPackage :: PackageName -> IO [Prelude.FilePath]
 sourcesForPackage package = do
