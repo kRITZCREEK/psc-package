@@ -668,11 +668,17 @@ main = do
 installAll :: IO ()
 installAll = do
   pkgC <- readPackageFile
-  getPackageSet pkgC
+  refreshPackageSet pkgC
   packageSet <- readPackageSet pkgC
   let packages = Map.toList packageSet
   forConcurrently_ packages . uncurry $ performInstall $ set pkgC
-
+  where
+    refreshPackageSet :: PackageConfig -> IO ()
+    refreshPackageSet PackageConfig{ source, set } = do
+      let pkgDir = ".psc-package" </> fromText set </> ".set"
+      exists <- testdir pkgDir
+      when exists (rmtree pkgDir)
+      void (cloneShallow source set pkgDir)
 -- Lint
 
 type Modulename = Text
