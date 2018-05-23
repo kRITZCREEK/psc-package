@@ -6,12 +6,14 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Main where
 
 import qualified Control.Foldl as Foldl
 import           Control.Concurrent.Async (forConcurrently_, mapConcurrently)
 import           Control.Monad.Except
+import           Control.Monad.Reader
 import           Control.Error.Util (note)
 import qualified Data.Aeson as Aeson
 import           Data.Aeson.Types (fieldLabelModifier)
@@ -595,9 +597,6 @@ main = do
         , Opts.command "install"
             (Opts.info (install <$> optional pkg Opts.<**> Opts.helper)
             (Opts.progDesc "Install/update the named package and add it to 'depends' if not already listed. If no package is specified, install/update all dependencies."))
-        , Opts.command "install-all"
-            (Opts.info (pure installAll)
-            (Opts.progDesc "Install all packages available in the package set."))
         , Opts.command "build"
             (Opts.info (exec ["purs", "compile"]
                         <$> onlyDeps "Compile only the package's dependencies"
@@ -634,11 +633,11 @@ main = do
         , Opts.command "format"
             (Opts.info (pure formatPackageFile)
             (Opts.progDesc "Format the packages.json file for consistency"))
+        , Opts.command "install-all"
+            (Opts.info (pure (runCmd installAll))
+            (Opts.progDesc "Install all packages available in the package set."))
         , Opts.command "lint"
-            (Opts.info (pure testLint)
-            (Opts.progDesc "Format the packages.json file for consistency"))
-        , Opts.command "infer"
-            (Opts.info (pure inferDeps)
+            (Opts.info (pure (runCmd lint))
             (Opts.progDesc "Format the packages.json file for consistency"))
         , Opts.command "dhall"
             (Opts.info (pure readDhallPackageSet)
@@ -683,15 +682,52 @@ main = do
              Opts.long "after"
           <> Opts.help "Skip packages before this package during verification"
 
+data CmdEnv = CmdEnv
+  { cmdEnvSet :: PackageSet
+  , cmdEnvCfg :: Maybe PackageConfig
+  }
+
+type Cmd = ReaderT CmdEnv IO
+
+tryReadPackageFile :: IO (Maybe PackageConfig)
+tryReadPackageFile = do
+  exists <- testfile packageFile
+  if not exists
+    then pure Nothing
+    else do
+      mpkg <- Aeson.eitherDecodeStrict . encodeUtf8 <$> readTextFile packageFile
+      case mpkg of
+          Left errors -> do
+            echoT $ "Unable to parse psc-package.json: " <> T.pack errors
+            pure Nothing
+          Right pkg -> return (Just pkg)
+
+getPackageSetCmd :: Cmd PackageSet
+getPackageSetCmd = asks cmdEnvSet
+
+getPackageCfg :: Cmd (Maybe PackageConfig)
+getPackageCfg = asks cmdEnvCfg
+
+getPackageSetName :: Cmd (Maybe Text)
+getPackageSetName = asks (fmap set . cmdEnvCfg)
+
+runCmd :: Cmd a -> IO a
+runCmd cmd = do
+  pkgC <- tryReadPackageFile
+  pkgSet <- case pkgC of
+    Nothing -> readLocalPackageSet
+    Just cfg -> readPackageSet cfg
+  runReaderT cmd (CmdEnv { cmdEnvSet = pkgSet, cmdEnvCfg = pkgC })
+
 -- Install All
 
-installAll :: IO ()
+installAll :: Cmd ()
 installAll = do
-  pkgC <- readPackageFile
-  refreshPackageSet pkgC
-  packageSet <- readPackageSet pkgC
+  pkgC <- getPackageCfg
+  lift $ for_ pkgC refreshPackageSet
+  packageSet <- getPackageSetCmd
   let packages = Map.toList packageSet
-  forConcurrently_ packages . uncurry $ performInstall $ set pkgC
+  lift $ forConcurrently_ packages . uncurry $ performInstall $ maybe "local" set pkgC
   where
     refreshPackageSet :: PackageConfig -> IO ()
     refreshPackageSet PackageConfig{ source, set } = do
@@ -705,104 +741,74 @@ installAll = do
 type Modulename = Text
 type PackageModuleMap = Map.Map Modulename PackageName
 
-testLint :: IO ()
-testLint = do
-  pkgC <- readPackageFile
-  packageSet <- readPackageSet pkgC
+lint :: Cmd ()
+lint = do
+  packageSet <- getPackageSetCmd
   let packages = Map.keys packageSet
   db <- packageModuleMap packageSet
-  pkgSet <- IORef.newIORef packageSet
+  pkgSet <- lift $ IORef.newIORef packageSet
+
+  lift $ echoT $ T.pack $ show packages
 
   for_ packages $ \pn -> do
     calculatedDeps <- Set.delete pn <$> dependenciesForPackage db pn
     let specifiedDeps = Set.fromList $ dependencies (packageSet Map.! pn)
     let superfluousDeps = specifiedDeps Set.\\ calculatedDeps
     let missingDeps = calculatedDeps Set.\\ specifiedDeps
-    unless (Set.null superfluousDeps) $ do
+    unless (Set.null superfluousDeps) $ lift $ do
       echoT ("Superfluous deps for package: " <> runPackageName pn)
       print superfluousDeps
-    unless (Set.null missingDeps) $ do
+    unless (Set.null missingDeps) $ lift $ do
       echoT ("Missing deps for package: " <> runPackageName pn)
       print (map runPackageName (Set.toList missingDeps))
-    IORef.modifyIORef pkgSet (\ps -> Map.update (\c -> Just (c { dependencies = Set.toList calculatedDeps})) pn ps)
+    lift $ IORef.modifyIORef pkgSet (\ps -> Map.update (\c -> Just (c { dependencies = Set.toList calculatedDeps})) pn ps)
 
-  result <- IORef.readIORef pkgSet
-  writePackageSet pkgC result
+  result <- lift $ IORef.readIORef pkgSet
+  getPackageCfg >>= \case
+    Nothing ->
+      lift $ writeLocalPackageSet result
+    Just pkgC ->
+      lift $ writePackageSet pkgC result
 
-inferDeps :: IO ()
-inferDeps = do
-  let localCfg = PackageConfig { name = PackageName "local", depends = [], set = "local", source = "" }
-  writePackageFile localCfg
-  packageSet <- readLocalPackageSet
-
-  let setDir = ".psc-package/local/.set/"
-  exists <- testdir setDir
-  unless exists (mkdir setDir)
-  writePackageSet localCfg packageSet
-  let packages = Map.keys packageSet
-
-  let packages' = Map.toList packageSet
-  forConcurrently_ packages' . uncurry $ performInstall "local"
-
-  db <- packageModuleMap packageSet
-  pkgSet <- IORef.newIORef packageSet
-
-  for_ packages $ \pn -> do
-    calculatedDeps <- Set.delete pn <$> dependenciesForPackage db pn
-    let specifiedDeps = Set.fromList $ dependencies (packageSet Map.! pn)
-    let superfluousDeps = specifiedDeps Set.\\ calculatedDeps
-    let missingDeps = calculatedDeps Set.\\ specifiedDeps
-    unless (Set.null superfluousDeps) $ do
-      echoT ("Superfluous deps for package: " <> runPackageName pn)
-      print superfluousDeps
-    unless (Set.null missingDeps) $ do
-      echoT ("Missing deps for package: " <> runPackageName pn)
-      print (map runPackageName (Set.toList missingDeps))
-    IORef.modifyIORef pkgSet (\ps -> Map.update (\c -> Just (c { dependencies = Set.toList calculatedDeps})) pn ps)
-
-  result <- IORef.readIORef pkgSet
-  writeLocalPackageSet result
-
-
-sourcesForPackage :: PackageName -> IO [Prelude.FilePath]
+sourcesForPackage :: PackageName -> Cmd [Prelude.FilePath]
 sourcesForPackage package = do
-  pkgC <- readPackageFile
-  db <- readPackageSet pkgC
+  db <- getPackageSetCmd
+  pkgC <- getPackageCfg
   let
     Just packageInfo = Map.lookup package db
     path = ".psc-package"
-      </> fromText (set pkgC)
+      </> fromText (maybe "local" set pkgC)
       </> fromText (runPackageName package)
       </> fromText (version packageInfo)
       </> "src" </> "**" </> "*.purs"
-  glob (encodeString path)
+  lift $ glob (encodeString path)
 
-modulesInPackage :: PackageName -> IO [(P.ModuleName, [P.ModuleName])]
+modulesInPackage :: PackageName -> Cmd [(P.ModuleName, [P.ModuleName])]
 modulesInPackage package = do
   paths <- sourcesForPackage package
-  modules <- runExceptT $ traverse PIDE.parseImportsFromFile paths
+  modules <- lift $ runExceptT $ traverse PIDE.parseImportsFromFile paths
   case modules of
     Left parseError -> error (show parseError)
     Right ms -> pure $ map (Bifunctor.second (map (\(x, _, _) -> x))) ms
 
-modulenamesInPackage :: PackageName -> IO (Set.Set Modulename)
+modulenamesInPackage :: PackageName -> Cmd (Set.Set Modulename)
 modulenamesInPackage package = do
   ms <- modulesInPackage package
   pure $ Set.fromList $ map (P.runModuleName . fst) ms
 
-importsInPackage :: PackageName -> IO (Set.Set Modulename)
+importsInPackage :: PackageName -> Cmd (Set.Set Modulename)
 importsInPackage package = do
   ms <- modulesInPackage package
   pure $ Set.fromList $ filter (not . T.isPrefixOf "Prim") $ map P.runModuleName $ concatMap snd ms
 
-packageModuleMap :: PackageSet -> IO PackageModuleMap
+packageModuleMap :: PackageSet -> Cmd PackageModuleMap
 packageModuleMap db = do
   xs <- for (Map.keys db) (\k -> do
     modules <- modulenamesInPackage k
     pure (map (,k) (Set.toList modules)))
   pure (Map.fromList (concat xs))
 
-dependenciesForPackage :: PackageModuleMap -> PackageName -> IO (Set.Set PackageName)
+dependenciesForPackage :: PackageModuleMap -> PackageName -> Cmd (Set.Set PackageName)
 dependenciesForPackage db package = do
   imports <- importsInPackage package
   pure (Set.map (\k ->
