@@ -679,6 +679,7 @@ installAll = do
       exists <- testdir pkgDir
       when exists (rmtree pkgDir)
       void (cloneShallow source set pkgDir)
+
 -- Lint
 
 type Modulename = Text
@@ -749,4 +750,9 @@ packageModuleMap db = do
 dependenciesForPackage :: PackageModuleMap -> PackageName -> IO (Set.Set PackageName)
 dependenciesForPackage db package = do
   imports <- importsInPackage package
-  pure (Set.map (\k -> fromMaybe (error (show k)) (Map.lookup k db)) imports)
+  pure (Set.map (\k ->
+    fromMaybe
+      (error ("When figuring out dependencies for: " <> show package
+              <> ", failed to find package for the module: "
+              <> show k))
+      (Map.lookup k db)) imports)
