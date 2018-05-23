@@ -12,6 +12,7 @@ module Main where
 import qualified Control.Foldl as Foldl
 import           Control.Concurrent.Async (forConcurrently_, mapConcurrently)
 import           Control.Monad.Except
+import           Control.Error.Util (note)
 import qualified Data.Aeson as Aeson
 import           Data.Aeson.Types (fieldLabelModifier)
 import           Data.Aeson.Encode.Pretty
@@ -198,15 +199,18 @@ performInstall set pkgName PackageInfo{ repo, version } = do
   pure pkgDir
 
 getReverseDeps  :: PackageSet -> PackageName -> IO [(PackageName, PackageInfo)]
-getReverseDeps db dep =
-    List.nub <$> foldMap go (Map.toList db)
+getReverseDeps = getReverseDeps' Set.empty
   where
-    go pair@(packageName, PackageInfo {dependencies}) =
-      case List.find (== dep) dependencies of
-        Nothing -> return mempty
-        Just _ -> do
-          innerDeps <- getReverseDeps db packageName
-          return $ pair : innerDeps
+    getReverseDeps' seen db dep = List.nub <$> foldMap (go seen db dep) (Map.toList db)
+    go seen db dep pair@(packageName, PackageInfo {dependencies})
+      | packageName `Set.member` seen =
+          exitWithErr ("Cycle in package dependencies at package " <> runPackageName packageName)
+      | otherwise =
+        case List.find (== dep) dependencies of
+          Nothing -> return mempty
+          Just _ -> do
+            innerDeps <- getReverseDeps' (Set.insert packageName seen) db packageName
+            return $ pair : innerDeps
 
 getTransitiveDeps :: PackageSet -> [PackageName] -> IO [(PackageName, PackageInfo)]
 getTransitiveDeps db deps =
@@ -503,7 +507,7 @@ data BowerInfo = BowerInfo
   { bower_name         :: Text
   , bower_repository   :: BowerInfoRepo
   , bower_dependencies :: Map.Map Text Text
-  , bower_version      :: Text
+  , bower_version      :: Maybe Text
   } deriving (Show, Eq, Generic)
 instance Aeson.FromJSON BowerInfo where
   parseJSON = Aeson.genericParseJSON Aeson.defaultOptions
@@ -515,22 +519,25 @@ data BowerOutput = BowerOutput
   } deriving (Show, Eq, Generic, Aeson.FromJSON)
 
 addFromBower :: String -> IO ()
-addFromBower name = do
-  let bowerProc = inproc "bower" [ "info", T.pack name, "--json", "-l=error" ] empty
+addFromBower arg = do
+  echoT $ "Adding package " <> name <> " at " <> (fromMaybe "latest" version) <> " from Bower..."
+  let bowerProc = inproc "bower" [ "info", T.pack arg, "--json", "-l=error" ] empty
   result <- fold <$> shellToIOText bowerProc
   if T.null result
     then exitWithErr "Error: Does the package exist on Bower?"
     else do
       let result' = do
-            bowerOutput <- Aeson.eitherDecodeStrict $ encodeUtf8 result
-            let bowerInfo = latest bowerOutput
+            bowerInfo <- case version of
+              Just _ -> Aeson.eitherDecodeStrict (encodeUtf8 result) :: Either String BowerInfo
+              Nothing -> latest <$> Aeson.eitherDecodeStrict (encodeUtf8 result) :: Either String BowerInfo
+            version' <- note "Unable to infer the package version" $ ("v" <>) <$> bower_version bowerInfo <|> version
             pkgName <- mkPackageName' $ bower_name bowerInfo
             packageNames <- traverse mkPackageName' $ Map.keys (bower_dependencies bowerInfo)
             pure $
               ( pkgName
               , PackageInfo
                 (T.replace "git:" "https:" . url $ bower_repository bowerInfo)
-                ("v" <> bower_version bowerInfo)
+                version'
                 packageNames
               )
       case result' of
@@ -542,6 +549,10 @@ addFromBower name = do
   where
     stripBowerNamePrefix s = fromMaybe s $ T.stripPrefix "purescript-" s
     mkPackageName' = Bifunctor.first show . mkPackageName . stripBowerNamePrefix
+    parseVersion' s = case s of
+      "" -> Nothing
+      s' -> Just $ T.tail s'
+    (name, version) = Bifunctor.second parseVersion' $ T.breakOn "#" $ T.pack arg
 
 formatPackageFile :: IO ()
 formatPackageFile =
