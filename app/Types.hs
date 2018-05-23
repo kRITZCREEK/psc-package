@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Types
-  ( PackageName
+  ( PackageName(..)
   , mkPackageName
   , runPackageName
   , preludePackageName

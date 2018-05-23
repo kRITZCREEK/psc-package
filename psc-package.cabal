@@ -29,10 +29,12 @@ executable psc-package
                    text -any,
                    purescript -any,
                    errors -any,
+                   dhall -any,
                    turtle <1.6
     main-is: Main.hs
     other-modules: Paths_psc_package
                    Types
+                   D
     buildable: True
     hs-source-dirs: app
     ghc-options: -Wall -O2 -threaded -rtsopts -with-rtsopts=-N

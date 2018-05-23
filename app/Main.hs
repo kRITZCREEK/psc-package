@@ -45,10 +45,13 @@ import qualified System.Process as Process
 import qualified Text.ParserCombinators.ReadP as Read
 import           Turtle hiding (arg, fold, s, x)
 import qualified Turtle
-import           Types (PackageName, mkPackageName, runPackageName, untitledPackageName, preludePackageName)
+import           Types (PackageName(..), mkPackageName, runPackageName, untitledPackageName, preludePackageName)
 import Filesystem.Path.CurrentOS (encodeString)
 import qualified Language.PureScript as P
 import qualified Language.PureScript.Ide.Imports as PIDE
+
+import qualified D as D
+import qualified Dhall as Dhall
 
 echoT :: Text -> IO ()
 echoT = Turtle.printf (Turtle.s % "\n")
@@ -634,6 +637,9 @@ main = do
         , Opts.command "lint"
             (Opts.info (pure testLint)
             (Opts.progDesc "Format the packages.json file for consistency"))
+        , Opts.command "dhall"
+            (Opts.info (pure readDhallPackageSet)
+            (Opts.progDesc "Format the packages.json file for consistency"))
         ]
       where
         pkg = Opts.strArgument $
@@ -767,3 +773,20 @@ dependenciesForPackage db package = do
               <> ", failed to find package for the module: "
               <> show k))
       (Map.lookup k db)) imports)
+
+readDhallPackageSet :: IO ()
+readDhallPackageSet = do
+  dpkgs <- Dhall.input Dhall.auto "./packages.dhall"
+  let pkgSet = convertDPackageSet dpkgs
+  writeLocalPackageSet pkgSet
+
+convertDPackageSet :: D.PackageSet -> PackageSet
+convertDPackageSet dpkgs =
+  Map.fromList
+  $ map (\dpkg ->
+            ( PackageName (D.name dpkg)
+            , PackageInfo { repo = D.repo dpkg
+                          , version = D.version dpkg
+                          , dependencies = map PackageName (D.dependencies dpkg)
+                          })
+        ) dpkgs
