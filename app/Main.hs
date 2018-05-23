@@ -637,6 +637,9 @@ main = do
         , Opts.command "lint"
             (Opts.info (pure testLint)
             (Opts.progDesc "Format the packages.json file for consistency"))
+        , Opts.command "infer"
+            (Opts.info (pure inferDeps)
+            (Opts.progDesc "Format the packages.json file for consistency"))
         , Opts.command "dhall"
             (Opts.info (pure readDhallPackageSet)
             (Opts.progDesc "Format the packages.json file for consistency"))
@@ -725,6 +728,41 @@ testLint = do
 
   result <- IORef.readIORef pkgSet
   writePackageSet pkgC result
+
+inferDeps :: IO ()
+inferDeps = do
+  let localCfg = PackageConfig { name = PackageName "local", depends = [], set = "local", source = "" }
+  writePackageFile localCfg
+  packageSet <- readLocalPackageSet
+
+  let setDir = ".psc-package/local/.set/"
+  exists <- testdir setDir
+  unless exists (mkdir setDir)
+  writePackageSet localCfg packageSet
+  let packages = Map.keys packageSet
+
+  let packages' = Map.toList packageSet
+  forConcurrently_ packages' . uncurry $ performInstall "local"
+
+  db <- packageModuleMap packageSet
+  pkgSet <- IORef.newIORef packageSet
+
+  for_ packages $ \pn -> do
+    calculatedDeps <- Set.delete pn <$> dependenciesForPackage db pn
+    let specifiedDeps = Set.fromList $ dependencies (packageSet Map.! pn)
+    let superfluousDeps = specifiedDeps Set.\\ calculatedDeps
+    let missingDeps = calculatedDeps Set.\\ specifiedDeps
+    unless (Set.null superfluousDeps) $ do
+      echoT ("Superfluous deps for package: " <> runPackageName pn)
+      print superfluousDeps
+    unless (Set.null missingDeps) $ do
+      echoT ("Missing deps for package: " <> runPackageName pn)
+      print (map runPackageName (Set.toList missingDeps))
+    IORef.modifyIORef pkgSet (\ps -> Map.update (\c -> Just (c { dependencies = Set.toList calculatedDeps})) pn ps)
+
+  result <- IORef.readIORef pkgSet
+  writeLocalPackageSet result
+
 
 sourcesForPackage :: PackageName -> IO [Prelude.FilePath]
 sourcesForPackage package = do
