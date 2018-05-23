@@ -748,8 +748,6 @@ lint = do
   db <- packageModuleMap packageSet
   pkgSet <- lift $ IORef.newIORef packageSet
 
-  lift $ echoT $ T.pack $ show packages
-
   for_ packages $ \pn -> do
     calculatedDeps <- Set.delete pn <$> dependenciesForPackage db pn
     let specifiedDeps = Set.fromList $ dependencies (packageSet Map.! pn)
