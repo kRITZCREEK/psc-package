@@ -48,7 +48,7 @@ import Filesystem.Path.CurrentOS (encodeString)
 import qualified Language.PureScript as P
 import qualified Language.PureScript.Ide.Imports as PIDE
 
-import qualified D as D
+import qualified Package as Package
 import qualified Dhall as Dhall
 
 echoT :: Text -> IO ()
@@ -699,13 +699,13 @@ readDhallPackageSet = do
   let pkgSet = convertDPackageSet dpkgs
   writeLocalPackageSet pkgSet
 
-convertDPackageSet :: D.PackageSet -> PackageSet
+convertDPackageSet :: [Package.Package] -> PackageSet
 convertDPackageSet dpkgs =
   Map.fromList
   $ map (\dpkg ->
-            ( PackageName (D.name dpkg)
-            , PackageInfo { repo = D.repo dpkg
-                          , version = D.version dpkg
-                          , dependencies = map PackageName (D.dependencies dpkg)
+            ( PackageName (Package.name dpkg)
+            , PackageInfo { repo = Package.repo dpkg
+                          , version = Package.version dpkg
+                          , dependencies = map PackageName (Package.dependencies dpkg)
                           })
         ) dpkgs

@@ -2,13 +2,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveAnyClass    #-}
 
-module D where
+module Package (Package(..)) where
 
 import Dhall
 
 import Data.Text as T
-
-type PackageSet = [Package]
 
 data Package = Package
   { name         :: T.Text
@@ -20,4 +18,4 @@ data Package = Package
 imp :: IO ()
 imp = do
   cfg <- input auto "./packages.dhall"
-  print (cfg :: PackageSet)
+  print (cfg :: [Package])

@@ -30,7 +30,7 @@ library
                    errors -any,
                    dhall -any,
                    turtle <1.6
-    exposed-modules: PscPackage, Types, D
+    exposed-modules: PscPackage, Types, PackageSet, Package, PackageConfig
     other-modules: Paths_psc_package
     hs-source-dirs: src
     ghc-options: -Wall -O2
