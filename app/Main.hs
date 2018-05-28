@@ -716,7 +716,7 @@ runCmd cmd = do
   pkgC <- tryReadPackageFile
   pkgSet <- case pkgC of
     Nothing -> readLocalPackageSet
-    Just cfg -> readPackageSet cfg
+    Just cfg -> getPackageSet cfg *> readPackageSet cfg
   runReaderT cmd (CmdEnv { cmdEnvSet = pkgSet, cmdEnvCfg = pkgC })
 
 -- Install All
