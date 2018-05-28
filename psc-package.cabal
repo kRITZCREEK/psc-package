@@ -13,7 +13,7 @@ build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
 
-executable psc-package
+library
     build-depends: base >=4 && <5,
                    aeson -any,
                    aeson-pretty -any,
@@ -23,7 +23,6 @@ executable psc-package
                    mtl -any,
                    containers -any,
                    foldl -any,
-                   optparse-applicative -any,
                    process -any,
                    system-filepath -any,
                    text -any,
@@ -31,10 +30,19 @@ executable psc-package
                    errors -any,
                    dhall -any,
                    turtle <1.6
+    exposed-modules: PscPackage, Types, D
+    other-modules: Paths_psc_package
+    hs-source-dirs: src
+    ghc-options: -Wall -O2
+    default-language:    Haskell2010
+
+executable psc-package
+    build-depends: base >=4 && <5,
+                   optparse-applicative -any,
+                   turtle <1.6,
+                   psc-package
     main-is: Main.hs
     other-modules: Paths_psc_package
-                   Types
-                   D
     buildable: True
     hs-source-dirs: app
     ghc-options: -Wall -O2 -threaded -rtsopts -with-rtsopts=-N
