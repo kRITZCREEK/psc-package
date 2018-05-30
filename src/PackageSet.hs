@@ -6,7 +6,6 @@ import Data.Map (Map)
 import Data.List (foldl')
 import qualified Data.Map as Map
 import Types (PackageName(..))
-import Data.Text (Text)
 
 data PackageSet = PackageSet (Map PackageName Package)
   deriving (Show)
@@ -15,12 +14,12 @@ data Warning = Override PackageName
   deriving (Show)
 
 fromPackages :: [Package] -> ([Warning], PackageSet)
-fromPackages = foldl' (\(warnings, PackageSet packages) package ->
-    let 
+fromPackages = flip foldl' ([], PackageSet Map.empty) (\(warnings, PackageSet packages) package ->
+    let
       pkgName = PackageName (Package.name package)
       newWarnings = if Map.member pkgName packages
         then Override pkgName : warnings
         else warnings
       newPackages = Map.insert pkgName package packages
     in
-      (newWarnings, PackageSet newPackages)) ([], PackageSet Map.empty)
+      (newWarnings, PackageSet newPackages))

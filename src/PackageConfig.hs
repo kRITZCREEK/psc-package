@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveAnyClass    #-}
 
-module PackageConfig (PackageConfig(..), read) where
+module PackageConfig (PackageConfig(..), read, readPackageSet) where
 
 import Prelude hiding (read)
 
@@ -20,11 +20,11 @@ data PackageConfig = PackageConfig
 
 -- | Reads a PackageConfig from the given Dhall expression:
 -- >>> PackageC.read "./psc-package.json"
-read :: Text -> IO [Package]
+read :: Text -> IO PackageConfig
 read path = input auto (TL.fromStrict path)
 
 readPackageSet :: Text -> IO ([PackageSet.Warning], PackageSet)
-readPackageSet = fmap PackageSet.fromPackages . read
+readPackageSet = fmap (PackageSet.fromPackages . packageSet) . read
 
 -- for GHCI purposes
 _imp :: IO ()
