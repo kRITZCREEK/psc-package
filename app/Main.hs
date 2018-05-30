@@ -73,7 +73,7 @@ main = do
             (Opts.progDesc "Check all packages in the package set for new releases"))
         , Opts.command "verify"
             (Opts.info (verify <$>
-                        ((Package . fromString <$> pkg)
+                        ((VPackage . fromString <$> pkg)
                          <|> (VerifyAll <$> optional (fromString <$> after)))
                         Opts.<**> Opts.helper)
             (Opts.progDesc "Verify that the named package builds correctly. If no package is specified, verify that all packages in the package set build correctly."))

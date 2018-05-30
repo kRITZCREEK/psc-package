@@ -20,7 +20,9 @@ import qualified Data.Text.Prettyprint.Doc as Pretty
 import Data.Text.Prettyprint.Doc.Render.Text (renderStrict)
 
 import Package (Package(..))
-import PackageSet (PackageSet(..))
+import qualified Package as Package
+import PackageSet (PackageSet)
+import Types
 
 import qualified Data.HashMap.Strict.InsOrd as IOHM
 
@@ -28,17 +30,17 @@ printPackageSet :: PackageSet -> Text
 printPackageSet = printExpr . mkPackageSet
 
 mkPackageSet :: PackageSet -> Expr s Path
-mkPackageSet (PackageSet pkgSet) =
-  ListLit Nothing (Seq.fromList $ map (mkPackage . snd) $ Map.toAscList pkgSet)
+mkPackageSet pkgSet =
+  ListLit Nothing (Seq.fromList $ map (mkPackage . uncurry Package.mergeInfo) $ Map.toAscList pkgSet)
 
 mkPackage :: Package -> Expr s Path
 mkPackage Package{..} =
   RecordLit
     (IOHM.fromList
-      [ ("name", textLit name)
-      , ("repo", textLit repo)
-      , ("version", textLit version)
-      , ("dependencies", listLit (map textLit dependencies))
+      [ ("name", textLit (runPackageName pkgName))
+      , ("repo", textLit pkgRepo)
+      , ("version", textLit pkgVersion)
+      , ("dependencies", listLit (map (textLit . runPackageName) pkgDependencies))
       ])
 
 listLit :: [Expr s a] -> Expr s a

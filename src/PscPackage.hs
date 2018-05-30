@@ -49,7 +49,9 @@ import qualified Language.PureScript as P
 import qualified Language.PureScript.Ide.Imports as PIDE
 
 import qualified D as D
+import Package (PackageInfo(..))
 import qualified Package as Package
+import PackageSet (PackageSet)
 import qualified PackageSet as PackageSet
 import qualified Dhall as Dhall
 
@@ -61,10 +63,13 @@ exitWithErr errText = errT errText >> exit (ExitFailure 1)
   where errT = traverse Turtle.err . textToLines
 
 packageFile :: Path.FilePath
-packageFile = "psc-package.json"
+packageFile = "psc-package.dhall"
 
 localPackageSet :: Path.FilePath
-localPackageSet = "packages.json"
+localPackageSet = "packages.dhall"
+
+localPackageSetInput :: Path.FilePath
+localPackageSetInput = "packagesInput.dhall"
 
 data PackageConfig = PackageConfig
   { name    :: PackageName
@@ -105,30 +110,10 @@ packageConfigToJSON =
                , confTrailingNewline = True
                }
 
-packageSetToJSON :: PackageSet -> Text
-packageSetToJSON =
-    TL.toStrict
-    . TB.toLazyText
-    . encodePrettyToTextBuilder' config
-  where
-    config = defConfig
-               { confCompare = compare
-               , confIndent = Spaces 2
-               , confTrailingNewline = True
-               }
-
 writePackageFile :: PackageConfig -> IO ()
 writePackageFile =
   writeTextFile packageFile
   . packageConfigToJSON
-
-data PackageInfo = PackageInfo
-  { repo         :: Text
-  , version      :: Text
-  , dependencies :: [PackageName]
-  } deriving (Show, Eq, Generic, Aeson.FromJSON, Aeson.ToJSON)
-
-type PackageSet = Map.Map PackageName PackageInfo
 
 cloneShallow
   :: Text
@@ -169,47 +154,44 @@ getPackageSet PackageConfig{ source, set } = do
 
 readPackageSet :: PackageConfig -> IO PackageSet
 readPackageSet PackageConfig{ set } = do
-  let dbFile = ".psc-package" </> fromText set </> ".set" </> "packages.json"
+  let dbFile = "./.psc-package" </> fromText set </> ".set" </> "packages.json"
   handleReadPackageSet dbFile
 
 handleReadPackageSet :: Path.FilePath -> IO PackageSet
-handleReadPackageSet dbFile = do
-  exists <- testfile dbFile
-  unless exists $ exitWithErr $ format (fp%" does not exist") dbFile
-  mdb <- Aeson.eitherDecodeStrict . encodeUtf8 <$> readTextFile dbFile
-  case mdb of
-    Left errors -> exitWithErr $ "Unable to parse packages.json: " <> T.pack errors
-    Right db -> return db
+handleReadPackageSet dbFile = snd . PackageSet.fromPackages <$> Dhall.input (Dhall.list Package.interpret) (TL.pack ("./" <> encodeString dbFile))
 
 writePackageSet :: PackageConfig -> PackageSet -> IO ()
 writePackageSet PackageConfig{ set } =
   let dbFile = ".psc-package" </> fromText set </> ".set" </> "packages.json"
-  in writeTextFile dbFile . packageSetToJSON
+  in writeTextFile dbFile . D.printPackageSet
 
 readLocalPackageSet :: IO PackageSet
 readLocalPackageSet = handleReadPackageSet localPackageSet
 
+readLocalInputPackageSet :: IO PackageSet
+readLocalInputPackageSet = handleReadPackageSet localPackageSetInput
+
 writeLocalPackageSet :: PackageSet -> IO ()
-writeLocalPackageSet = writeTextFile localPackageSet . packageSetToJSON
+writeLocalPackageSet = writeTextFile localPackageSet . D.printPackageSet
 
 performInstall :: Text -> PackageName -> PackageInfo -> IO Turtle.FilePath
-performInstall set pkgName PackageInfo{ repo, version } = do
-  let pkgDir = ".psc-package" </> fromText set </> fromText (runPackageName pkgName) </> fromText version
+performInstall set pkgName PackageInfo{ infoRepo, infoVersion } = do
+  let pkgDir = ".psc-package" </> fromText set </> fromText (runPackageName pkgName) </> fromText infoVersion
   exists <- testdir pkgDir
   unless exists . void $ do
     echoT ("Installing " <> runPackageName pkgName)
-    cloneShallow repo version pkgDir
+    cloneShallow infoRepo infoVersion pkgDir
   pure pkgDir
 
 getReverseDeps  :: PackageSet -> PackageName -> IO [(PackageName, PackageInfo)]
 getReverseDeps = getReverseDeps' Set.empty
   where
     getReverseDeps' seen db dep = List.nub <$> foldMap (go seen db dep) (Map.toList db)
-    go seen db dep pair@(packageName, PackageInfo {dependencies})
+    go seen db dep pair@(packageName, PackageInfo { infoDependencies})
       | packageName `Set.member` seen =
           exitWithErr ("Cycle in package dependencies at package " <> runPackageName packageName)
       | otherwise =
-        case List.find (== dep) dependencies of
+        case List.find (== dep) infoDependencies of
           Nothing -> return mempty
           Just _ -> do
             innerDeps <- getReverseDeps' (Set.insert packageName seen) db packageName
@@ -226,8 +208,8 @@ getTransitiveDeps db deps =
         case Map.lookup pkg db of
           Nothing ->
             exitWithErr ("Package " <> runPackageName pkg <> " does not exist in package set")
-          Just info@PackageInfo{ dependencies } -> do
-            m <- fold <$> traverse (go (Set.insert pkg seen)) dependencies
+          Just info@PackageInfo{ infoDependencies } -> do
+            m <- fold <$> traverse (go (Set.insert pkg seen)) infoDependencies
             return (Map.insert pkg info m)
 
 installImpl :: PackageConfig -> IO ()
@@ -327,12 +309,12 @@ listPackages sorted = do
     else traverse_ echoT (fmt <$> Map.assocs db)
   where
   fmt :: (PackageName, PackageInfo) -> Text
-  fmt (name, PackageInfo{ version, repo }) =
-    runPackageName name <> " (" <> version <> ", " <> repo <> ")"
+  fmt (name, PackageInfo{ infoVersion, infoRepo }) =
+    runPackageName name <> " (" <> infoVersion <> ", " <> infoRepo <> ")"
 
   inOrder xs = fromNode . fromVertex <$> vs where
     (gr, fromVertex) =
-      G.graphFromEdges' [ (pkg, name, dependencies pkg)
+      G.graphFromEdges' [ (pkg, name, infoDependencies pkg)
                         | (name, pkg) <- xs
                         ]
     vs = G.topSort (G.transposeG gr)
@@ -344,9 +326,9 @@ getSourcePaths PackageConfig{..} db pkgNames = do
   let paths = [ ".psc-package"
                 </> fromText set
                 </> fromText (runPackageName pkgName)
-                </> fromText version
+                </> fromText infoVersion
                 </> "src" </> "**" </> "*.purs"
-              | (pkgName, PackageInfo{ version }) <- trans
+              | (pkgName, PackageInfo{ infoVersion }) <- trans
               ]
   return paths
 
@@ -392,22 +374,22 @@ checkForUpdates applyMinorUpdates applyMajorUpdates = do
     echoT ("Checking " <> pack (show (Map.size db)) <> " packages for updates.")
     echoT "Warning: this could take some time!"
 
-    newDb <- Map.fromList <$> for (Map.toList db) (\(name, p@PackageInfo{ repo, version }) -> do
+    newDb <- Map.fromList <$> for (Map.toList db) (\(name, p@PackageInfo{ infoRepo, infoVersion }) -> do
       echoT ("Checking package " <> runPackageName name)
-      tagLines <- Turtle.fold (listRemoteTags repo) Foldl.list
+      tagLines <- Turtle.fold (listRemoteTags infoRepo) Foldl.list
       let tags = mapMaybe parseTag tagLines
-      newVersion <- case parsePackageVersion version of
+      newVersion <- case parsePackageVersion infoVersion of
         Just parts ->
           let applyMinor =
                 case filter (isMinorReleaseFrom parts) tags of
-                  [] -> pure version
+                  [] -> pure infoVersion
                   minorReleases -> do
                     echoT "New minor release available"
                     if applyMinorUpdates
                       then do
                         let latestMinorRelease = maximum minorReleases
                         pure ("v" <> T.intercalate "." (map (pack . show) latestMinorRelease))
-                      else pure version
+                      else pure infoVersion
               applyMajor =
                 case filter (isMajorReleaseFrom parts) tags of
                   [] -> applyMinor
@@ -421,8 +403,8 @@ checkForUpdates applyMinorUpdates applyMajorUpdates = do
           in applyMajor
         _ -> do
           echoT "Unable to parse version string"
-          pure version
-      pure (name, p { version = newVersion }))
+          pure infoVersion
+      pure (name, p { infoVersion = newVersion }))
 
     when (applyMinorUpdates || applyMajorUpdates)
       (writePackageSet pkg newDb)
@@ -462,7 +444,7 @@ checkForUpdates applyMinorUpdates applyMajorUpdates = do
     isMinorReleaseFrom (x : xs) (y : ys) = y == x && ys > xs
     isMinorReleaseFrom _        _        = False
 
-data VerifyArgs a = Package a | VerifyAll (Maybe a) deriving (Functor, Foldable, Traversable)
+data VerifyArgs a = VPackage a | VerifyAll (Maybe a) deriving (Functor, Foldable, Traversable)
 
 verify :: VerifyArgs Text -> IO ()
 verify arg = do
@@ -470,7 +452,7 @@ verify arg = do
   db  <- readPackageSet pkg
   case traverse mkPackageName arg of
     Left pnError -> echoT . pack $ "Error while parsing arguments to verify: " <> show pnError
-    Right (Package pName) -> case Map.lookup pName db of
+    Right (VPackage pName) -> case Map.lookup pName db of
       Nothing -> echoT . pack $ "No packages found with the name " <> show (runPackageName pName)
       Just _  -> do
         reverseDeps <- map fst <$> getReverseDeps db pName
@@ -594,7 +576,7 @@ runCmd :: Cmd a -> IO a
 runCmd cmd = do
   pkgC <- tryReadPackageFile
   pkgSet <- case pkgC of
-    Nothing -> readLocalPackageSet
+    Nothing -> readLocalInputPackageSet
     Just cfg -> getPackageSet cfg *> readPackageSet cfg
   runReaderT cmd (CmdEnv { cmdEnvSet = pkgSet, cmdEnvCfg = pkgC })
 
@@ -629,7 +611,7 @@ lint = do
 
   for_ packages $ \pn -> do
     calculatedDeps <- Set.delete pn <$> dependenciesForPackage db pn
-    let specifiedDeps = Set.fromList $ dependencies (packageSet Map.! pn)
+    let specifiedDeps = Set.fromList $ infoDependencies (packageSet Map.! pn)
     let superfluousDeps = specifiedDeps Set.\\ calculatedDeps
     let missingDeps = calculatedDeps Set.\\ specifiedDeps
     unless (Set.null superfluousDeps) $ lift $ do
@@ -638,13 +620,12 @@ lint = do
     unless (Set.null missingDeps) $ lift $ do
       echoT ("Missing deps for package: " <> runPackageName pn)
       print (map runPackageName (Set.toList missingDeps))
-    lift $ IORef.modifyIORef pkgSet (\ps -> Map.update (\c -> Just (c { dependencies = Set.toList calculatedDeps})) pn ps)
+    lift $ IORef.modifyIORef pkgSet (\ps -> Map.update (\c -> Just (c { infoDependencies = Set.toList calculatedDeps})) pn ps)
 
   result <- lift $ IORef.readIORef pkgSet
   getPackageCfg >>= \case
     Nothing -> do
       lift $ writeLocalPackageSet result
-      lift $ writeLocalPackageSetD result
     Just pkgC ->
       lift $ writePackageSet pkgC result
 
@@ -657,7 +638,7 @@ sourcesForPackage package = do
     path = ".psc-package"
       </> fromText (maybe "local" set pkgC)
       </> fromText (runPackageName package)
-      </> fromText (version packageInfo)
+      </> fromText (infoVersion packageInfo)
       </> "src" </> "**" </> "*.purs"
   lift $ glob (encodeString path)
 
@@ -698,29 +679,5 @@ dependenciesForPackage db package = do
 
 readDhallPackageSet :: IO ()
 readDhallPackageSet = do
-  dpkgs <- Dhall.input Dhall.auto "./packages.dhall"
-  let pkgSet = convertDPackageSet dpkgs
-  writeLocalPackageSet pkgSet
-
-convertDPackageSet :: [Package.Package] -> PackageSet
-convertDPackageSet dpkgs =
-  Map.fromList
-  $ map (\dpkg ->
-            ( PackageName (Package.name dpkg)
-            , PackageInfo { repo = Package.repo dpkg
-                          , version = Package.version dpkg
-                          , dependencies = map PackageName (Package.dependencies dpkg)
-                          })
-        ) dpkgs
-
-writeLocalPackageSetD :: PackageSet -> IO ()
-writeLocalPackageSetD = writeTextFile "packages.dhall" . go
-  where
-    go :: PackageSet -> Text
-    go pkgSet =
-      Map.toList pkgSet
-      & map (\(name, PackageInfo{..}) ->
-               Package.Package (runPackageName name) repo version (map runPackageName dependencies))
-      & PackageSet.fromPackages
-      & snd
-      & D.printPackageSet
+  dpkgs <- Dhall.input (Dhall.list Package.interpret) "./packages.dhall"
+  writeLocalPackageSet $ snd $ PackageSet.fromPackages dpkgs

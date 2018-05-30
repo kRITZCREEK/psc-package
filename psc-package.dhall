@@ -1,3 +1,3 @@
-{ packageSet = ../package-sets/core.dhall
+{ packageSet = ../package-sets/packages.dhall
 , dependencies = [ "prelude" ]
 }
