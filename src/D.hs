@@ -11,6 +11,7 @@ module D where
 
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
+import qualified Data.Map as Map
 import Data.Text.Lazy.Builder as Builder
 import qualified Dhall.Core as Dhall
 import Dhall.Core
@@ -19,8 +20,16 @@ import qualified Data.Text.Prettyprint.Doc as Pretty
 import Data.Text.Prettyprint.Doc.Render.Text (renderStrict)
 
 import Package (Package(..))
+import PackageSet (PackageSet(..))
 
 import qualified Data.HashMap.Strict.InsOrd as IOHM
+
+printPackageSet :: PackageSet -> Text
+printPackageSet = printExpr . mkPackageSet
+
+mkPackageSet :: PackageSet -> Expr s Path
+mkPackageSet (PackageSet pkgSet) =
+  ListLit Nothing (Seq.fromList $ map (mkPackage . snd) $ Map.toAscList pkgSet)
 
 mkPackage :: Package -> Expr s Path
 mkPackage Package{..} =

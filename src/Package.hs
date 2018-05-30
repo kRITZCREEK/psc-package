@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveAnyClass    #-}
 
-module Package (Package(..)) where
+module Package (Package(..), _prelude) where
 
 import Dhall
 

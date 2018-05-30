@@ -48,7 +48,9 @@ import Filesystem.Path.CurrentOS (encodeString)
 import qualified Language.PureScript as P
 import qualified Language.PureScript.Ide.Imports as PIDE
 
+import qualified D as D
 import qualified Package as Package
+import qualified PackageSet as PackageSet
 import qualified Dhall as Dhall
 
 echoT :: Text -> IO ()
@@ -640,8 +642,9 @@ lint = do
 
   result <- lift $ IORef.readIORef pkgSet
   getPackageCfg >>= \case
-    Nothing ->
+    Nothing -> do
       lift $ writeLocalPackageSet result
+      lift $ writeLocalPackageSetD result
     Just pkgC ->
       lift $ writePackageSet pkgC result
 
@@ -709,3 +712,15 @@ convertDPackageSet dpkgs =
                           , dependencies = map PackageName (Package.dependencies dpkg)
                           })
         ) dpkgs
+
+writeLocalPackageSetD :: PackageSet -> IO ()
+writeLocalPackageSetD = writeTextFile "packages.dhall" . go
+  where
+    go :: PackageSet -> Text
+    go pkgSet =
+      Map.toList pkgSet
+      & map (\(name, PackageInfo{..}) ->
+               Package.Package (runPackageName name) repo version (map runPackageName dependencies))
+      & PackageSet.fromPackages
+      & snd
+      & D.printPackageSet
