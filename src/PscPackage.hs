@@ -37,6 +37,7 @@ import qualified Data.Text.Read as TR
 import           Data.Traversable (for)
 import           Data.Version (Version(..), parseVersion, showVersion)
 import qualified Filesystem.Path.CurrentOS as Path
+import           Filesystem.Path.CurrentOS (encodeString)
 import           GHC.Generics (Generic)
 import           System.FilePath.Glob (glob)
 import qualified System.Process as Process
@@ -44,7 +45,6 @@ import qualified Text.ParserCombinators.ReadP as Read
 import           Turtle hiding (arg, fold, s, x)
 import qualified Turtle
 import           Types (PackageName(..), mkPackageName, runPackageName, untitledPackageName, preludePackageName)
-import Filesystem.Path.CurrentOS (encodeString)
 import qualified Language.PureScript as P
 import qualified Language.PureScript.Ide.Imports as PIDE
 

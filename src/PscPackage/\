@@ -1,0 +1,52 @@
+{-# LANGUAGE OverloadedStrings #-}
+module PscPackage.Client where
+
+import           Turtle hiding (arg, fold, s, x)
+import qualified Turtle
+import PackageConfig (PackageConfig)
+import qualified PackageConfig as PackageConfig
+import Control.Monad.Reader (ReaderT, runReaderT, ask)
+
+{-
+psc-package install [package-name]
+psc-package init
+psc-package updates
+psc-package available
+-}
+
+type Env = PackageConfig
+type Cmd = ReaderT Env IO
+
+runCmd :: Cmd a -> IO a
+runCmd action = do
+  cfg <- readPackageConfig
+  runReaderT action cfg
+
+readPackageConfig :: IO PackageConfig
+readPackageConfig = do
+  exists <- testfile "psc-package.dhall"
+  unless exists $ do
+    -- TODO Show the path we tried here
+    exitWithErr "Failed to find your package config at psc-package.dhall."
+  PackageConfig.read "./psc-package.dhall"
+
+exitWithErr :: Text -> IO a
+exitWithErr errText = errT errText >> exit (ExitFailure 1)
+  where errT = traverse Turtle.err . textToLines
+
+install :: Maybe PackageName -> IO ()
+install = runCmd . installImpl
+
+installImpl :: Maybe PackageName -> Cmd ()
+installImpl pn = case pn of
+  Nothing -> installAll
+  Just pn -> do
+
+installAll :: Cmd ()
+installAll = do
+ pkgSet <- ask
+
+
+-- init :: IO ()
+-- updates :: Cmd ()
+-- available :: Cmd ()

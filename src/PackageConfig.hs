@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveAnyClass    #-}
 
-module PackageConfig (PackageConfig(..), read, readPackageSet) where
+module PackageConfig (PackageConfig(..), read, readPackageSet, getPackageSet) where
 
 import Prelude hiding (read)
 
@@ -28,6 +28,9 @@ read path = input interpret (TL.fromStrict path)
 
 readPackageSet :: T.Text -> IO ([PackageSet.Warning], PackageSet)
 readPackageSet = fmap (PackageSet.fromPackages . packageSet) . read
+
+getPackageSet :: PackageConfig -> PackageSet
+getPackageSet = snd . PackageSet.fromPackages . packageSet
 
 interpret :: Dhall.Type PackageConfig
 interpret = Dhall.record
