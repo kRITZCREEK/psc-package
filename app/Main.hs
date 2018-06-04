@@ -13,6 +13,8 @@ import qualified Paths_psc_package as Paths
 import           System.Environment (getArgs)
 import qualified System.IO as IO
 
+import qualified PscPackage.Client as Client
+
 main :: IO ()
 main = do
     IO.hSetEncoding IO.stdout IO.utf8
@@ -83,8 +85,11 @@ main = do
         , Opts.command "format"
             (Opts.info (pure formatPackageFile)
             (Opts.progDesc "Format the packages.json file for consistency"))
+        , Opts.command "new-install"
+            (Opts.info (pure Client.install)
+            (Opts.progDesc "Install all packages available in the package set."))
         , Opts.command "install-all"
-            (Opts.info (pure (runCmd installAll))
+            (Opts.info (pure Client.installAll)
             (Opts.progDesc "Install all packages available in the package set."))
         , Opts.command "lint"
             (Opts.info (pure (runCmd lint))
