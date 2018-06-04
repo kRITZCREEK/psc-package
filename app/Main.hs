@@ -88,9 +88,15 @@ main = do
         , Opts.command "new-install"
             (Opts.info (pure Client.install)
             (Opts.progDesc "Install all packages available in the package set."))
-        , Opts.command "install-all"
+        , Opts.command "new-install-all"
             (Opts.info (pure Client.installAll)
             (Opts.progDesc "Install all packages available in the package set."))
+        , Opts.command "install-all"
+            (Opts.info (pure (runCmd installAll))
+            (Opts.progDesc "Install all packages available in the package set."))
+        , Opts.command "new-sources"
+            (Opts.info (pure Client.sources)
+            (Opts.progDesc "Format the packages.json file for consistency"))
         , Opts.command "lint"
             (Opts.info (pure (runCmd lint))
             (Opts.progDesc "Format the packages.json file for consistency"))

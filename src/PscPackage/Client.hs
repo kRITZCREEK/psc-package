@@ -5,11 +5,14 @@ module PscPackage.Client where
 
 import           Control.Concurrent.Async (forConcurrently_)
 import           Control.Monad.Reader (ReaderT, runReaderT, asks, lift)
+import           Data.Foldable (for_)
+import           Data.Traversable (for)
 import qualified Data.Graph as Graph
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Data.Maybe (fromMaybe)
-import           Package (PackageInfo(..))
+import           Data.Maybe (fromMaybe, mapMaybe, catMaybes)
+import           Package (Package(..), PackageInfo(..))
+import qualified Package as Package
 import           PackageConfig (PackageConfig)
 import qualified PackageConfig as PackageConfig
 import           PackageSet (PackageSet)
@@ -19,10 +22,19 @@ import qualified Turtle
 import           Turtle hiding (arg, fold, s, x)
 import           Types (PackageName(..), runPackageName)
 
+import qualified Data.Set as Set
+
+ordNub :: (Ord a) => [a] -> [a]
+ordNub l = go Set.empty l
+  where
+    go _ [] = []
+    go s (x:xs) = if x `Set.member` s then go s xs
+                                      else x : go (Set.insert x s) xs
 {-
 psc-package install [package-name]
 psc-package init
 psc-package updates
+psc-package available
 psc-package available
 -}
 
@@ -57,6 +69,19 @@ askPackageSet = asks (snd . PackageSet.fromPackages . PackageConfig.packageSet)
 askDependencies :: Cmd [PackageName]
 askDependencies = asks PackageConfig.dependencies
 
+askTransDependencies :: Cmd [Package]
+askTransDependencies = do
+  packageSet <- askPackageSet
+  deps <- asks PackageConfig.dependencies
+  let transDeps = ordNub (foldMap (transitiveDeps packageSet) deps)
+  fmap catMaybes $ for transDeps $ \pn ->  do
+    case Map.lookup pn packageSet of
+      Nothing -> do
+        lift $ echoT $ "[WARNING] Failed to find transitive dependency \"" <> runPackageName pn <> "\" in package set. This most likely means there is a problem with the packageset"
+        pure Nothing
+      Just info ->
+        pure (Just (Package.mergeInfo pn info))
+
 readPackageConfig :: IO PackageConfig
 readPackageConfig = do
   exists <- testfile "psc-package.dhall"
@@ -71,31 +96,34 @@ install = runCmd installImpl
 installAll :: IO ()
 installAll = runCmd installAllImpl
 
+sources :: IO ()
+sources = runCmd sourcesImpl
+
 installImpl :: Cmd ()
 installImpl = do
-  deps <- askDependencies
-  packageSet <- askPackageSet
-  lift $ forConcurrently_ deps $ \pn ->
-    case Map.lookup pn packageSet of
-      Nothing ->
-        exitWithErr $ "Failed to find dependency " <> runPackageName pn <> " in package-set"
-      Just info ->
-        performInstall pn info
+  deps <- askTransDependencies
+  lift $ forConcurrently_ deps performInstall
 
 installAllImpl :: Cmd ()
 installAllImpl = do
   pkgSet <- askPackageSet
-  let packages = Map.toList pkgSet
-  lift $ forConcurrently_ packages (uncurry performInstall)
+  let packages = map (uncurry Package.mergeInfo) (Map.toList pkgSet)
+  lift $ forConcurrently_ packages performInstall
 
-performInstall :: PackageName -> PackageInfo -> IO Turtle.FilePath
-performInstall pkgName PackageInfo{ infoRepo, infoVersion } = do
-  let pkgDir = ".psc-package" </> fromText (runPackageName pkgName) </> fromText infoVersion
+performInstall :: Package -> IO Turtle.FilePath
+performInstall Package { pkgName, pkgRepo, pkgVersion } = do
+  let pkgDir = ".psc-package" </> fromText (runPackageName pkgName) </> fromText pkgVersion
   exists <- testdir pkgDir
   unless exists . void $ do
     echoT ("Installing " <> runPackageName pkgName)
-    cloneShallow infoRepo infoVersion pkgDir
+    cloneShallow pkgRepo pkgVersion pkgDir
   pure pkgDir
+
+sourcesImpl :: Cmd ()
+sourcesImpl = do
+  deps <- askTransDependencies
+  for_ deps $ \Package { pkgName, pkgVersion} -> do
+    lift $ echoT $ ".psc-package/" <> runPackageName pkgName <> "/" <> pkgVersion <> "/src/**/*.purs"
 
 echoT :: Text -> IO ()
 echoT = Turtle.printf (Turtle.s % "\n")

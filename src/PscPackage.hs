@@ -679,5 +679,5 @@ dependenciesForPackage db package = do
 
 readDhallPackageSet :: IO ()
 readDhallPackageSet = do
-  dpkgs <- Dhall.input (Dhall.list Package.interpret) "./packages.dhall"
+  dpkgs <- Dhall.input (Dhall.list Package.interpret) "./packagesInput.dhall"
   writeLocalPackageSet $ snd $ PackageSet.fromPackages dpkgs
