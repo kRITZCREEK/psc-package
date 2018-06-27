@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NamedFieldPuns #-}
-module PscPackage.Client where
+module PscPackage.Set where
 
 import           Control.Concurrent.Async (forConcurrently_)
 import           Control.Monad.Reader (ReaderT, runReaderT, asks, lift)
@@ -10,7 +10,7 @@ import           Data.Traversable (for)
 import qualified Data.Graph as Graph
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Data.Maybe (fromMaybe, catMaybes)
+import           Data.Maybe (fromMaybe, mapMaybe, catMaybes)
 import           Package (Package(..), PackageInfo(..))
 import qualified Package as Package
 import           PackageConfig (PackageConfig)
@@ -31,12 +31,12 @@ ordNub l = go Set.empty l
     go s (x:xs) = if x `Set.member` s then go s xs
                                       else x : go (Set.insert x s) xs
 {-
-psc-package init
-psc-package updates
-psc-package available
+pup set install
+pup set updates
+pup set lint
 -}
 
-type Env = PackageConfig
+type Env = PackageSet
 type Cmd = ReaderT Env IO
 
 mkPackageGraph
@@ -54,11 +54,11 @@ mkPackageGraph ps =
 transitiveDeps :: PackageSet -> PackageName -> [PackageName]
 transitiveDeps ps pn =
   let (graph, vertexToInfo, pnToVertex) = mkPackageGraph ps
-  in map ((\(_, pn', _) -> pn') . vertexToInfo) $ Graph.reachable graph (fromMaybe undefined (pnToVertex pn))
+  in map ((\(_, pn, _) -> pn) . vertexToInfo) $ Graph.reachable graph (fromMaybe undefined (pnToVertex pn))
 
 runCmd :: Cmd a -> IO a
 runCmd action = do
-  cfg <- readPackageConfig
+  cfg <- readPackageSet
   runReaderT action cfg
 
 askPackageSet :: Cmd PackageSet
@@ -80,30 +80,13 @@ askTransDependencies = do
       Just info ->
         pure (Just (Package.mergeInfo pn info))
 
-readPackageConfig :: IO PackageConfig
-readPackageConfig = do
-  exists <- testfile "psc-package.dhall"
+readPackageSet :: IO PackageSet
+readPackageSet = do
+  exists <- testfile "package-set.dhall"
   unless exists $ do
     -- TODO Show the path we tried here
-    exitWithErr "Failed to find your package config at psc-package.dhall."
-  PackageConfig.read "./psc-package.dhall"
-
-
--- | We cache a package config once we've fully evaluated it to avoid hitting
--- the network whenever we read the package config
-
--- I'd like to invalidate it by storing the initial expression/a hash of it, but
--- I don't want changes to the dependencies field to invalidate the cache.
-
--- | OPTION 1: Store dependencies separately, fully infer them from the metadata?
-
--- | OPTION 2: Place restrictions on the allowed format of the psc-package.dhall
--- file (iffy)?
-cachePackageConfig :: PackageConfig -> IO ()
-cachePackageConfig cfg = do
-  let setCacheDir = ".psc-package" </> ".set"
-  exists <- testdir setCacheDir
-  unless exists (Turtle.mkdir setCacheDir)
+    exitWithErr "Failed to find your package set at package-set.dhall."
+  Package.read "./psc-package.dhall"
 
 install :: IO ()
 install = runCmd installImpl

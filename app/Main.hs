@@ -37,108 +37,123 @@ main = do
       Opts.long "version" <> Opts.help "Show the version number" <> Opts.hidden
 
     commands :: Opts.Parser (IO ())
-    commands = (Opts.subparser . fold)
-        [ Opts.command "init"
-            (Opts.info (initialize <$> optional ((,) <$> (fromString <$> set)
-                                                     <*> optional (fromString <$> source))
-                                   Opts.<**> Opts.helper)
-            (Opts.progDesc "Create a new psc-package.json file"))
-        , Opts.command "uninstall"
-            (Opts.info (uninstall <$> pkg Opts.<**> Opts.helper)
-            (Opts.progDesc "Uninstall the named package"))
-        , Opts.command "install"
-            (Opts.info (install <$> optional pkg Opts.<**> Opts.helper)
-            (Opts.progDesc "Install/update the named package and add it to 'depends' if not already listed. If no package is specified, install/update all dependencies."))
-        , Opts.command "build"
-            (Opts.info (exec ["purs", "compile"]
-                        <$> onlyDeps "Compile only the package's dependencies"
-                        <*> passthroughArgs "purs compile"
-                        Opts.<**> Opts.helper)
-            (Opts.progDesc "Install dependencies and compile the current package"))
-        , Opts.command "repl"
-            (Opts.info (exec ["purs", "repl"]
-                        <$> onlyDeps "Load only the package's dependencies"
-                        <*> passthroughArgs "purs repl"
-                        Opts.<**> Opts.helper)
-            (Opts.progDesc "Open an interactive environment for PureScript"))
-        , Opts.command "dependencies"
-            (Opts.info (pure listDependencies)
-            (Opts.progDesc "List all (transitive) dependencies for the current package"))
-        , Opts.command "sources"
-            (Opts.info (pure listSourcePaths)
-            (Opts.progDesc "List all (active) source paths for dependencies"))
-        , Opts.command "available"
-            (Opts.info (listPackages <$> sorted Opts.<**> Opts.helper)
-            (Opts.progDesc "List all packages available in the package set"))
-        , Opts.command "updates"
-            (Opts.info (checkForUpdates <$> apply <*> applyMajor Opts.<**> Opts.helper)
-            (Opts.progDesc "Check all packages in the package set for new releases"))
-        , Opts.command "verify"
-            (Opts.info (verify <$>
-                        ((VPackage . fromString <$> pkg)
-                         <|> (VerifyAll <$> optional (fromString <$> after)))
-                        Opts.<**> Opts.helper)
-            (Opts.progDesc "Verify that the named package builds correctly. If no package is specified, verify that all packages in the package set build correctly."))
-        , Opts.command "add-from-bower"
-            (Opts.info (addFromBower <$> pkg Opts.<**> Opts.helper)
-            (Opts.progDesc "Add a package from the Bower registry to the package set. This requires Bower to be installed on your system."))
-        , Opts.command "format"
-            (Opts.info (pure formatPackageFile)
-            (Opts.progDesc "Format the packages.json file for consistency"))
-        , Opts.command "new-install"
-            (Opts.info (pure Client.install)
-            (Opts.progDesc "Install all packages available in the package set."))
-        , Opts.command "new-install-all"
-            (Opts.info (pure Client.installAll)
-            (Opts.progDesc "Install all packages available in the package set."))
-        , Opts.command "install-all"
-            (Opts.info (pure (runCmd installAll))
-            (Opts.progDesc "Install all packages available in the package set."))
-        , Opts.command "new-sources"
-            (Opts.info (pure Client.sources)
-            (Opts.progDesc "Format the packages.json file for consistency"))
-        , Opts.command "lint"
-            (Opts.info (pure (runCmd lint))
-            (Opts.progDesc "Format the packages.json file for consistency"))
-        , Opts.command "dhall"
-            (Opts.info (pure readDhallPackageSet)
-            (Opts.progDesc "Format the packages.json file for consistency"))
-        ]
-      where
-        pkg = Opts.strArgument $
-             Opts.metavar "PACKAGE"
-          <> Opts.help "The name of the package to install"
+    commands = Opts.subparser $ fold
+      [ Opts.command "set"
+          (Opts.info setCommand (Opts.progDesc "Commands for managing package sets"))
 
-        source = Opts.strOption $
-             Opts.long "source"
-          <> Opts.help "The Git repository for the package set"
+      , Opts.command "build"
+         (Opts.info (exec ["purs", "compile"]
+                     <$> onlyDeps "Compile only the package's dependencies"
+                     <*> passthroughArgs "purs compile"
+                     Opts.<**> Opts.helper)
+         (Opts.progDesc "Install dependencies and compile the current package"))
+      ]
+    setCommand = Opts.helper <*> (Opts.subparser $ fold
+      [ Opts.command "lint"
+          (Opts.info (pure (runCmd lint))
+          (Opts.progDesc "Format the packages.json file for consistency"))
+      ])
 
-        set = Opts.strOption $
-             Opts.long "set"
-          <> Opts.help "The package set tag name"
+    onlyDeps help = Opts.switch $
+         Opts.long "only-dependencies"
+      <> Opts.short 'd'
+      <> Opts.help help
 
-        apply = Opts.switch $
-             Opts.long "apply"
-          <> Opts.help "Apply all minor package updates"
+    passthroughArgs cmd = many $ Opts.strArgument $
+         Opts.help ("Options passed through to " <> cmd <> "; use -- to separate")
+      <> Opts.metavar ("`" <> cmd <> "`" <> "-options")
+      --   [ Opts.command "init"
+      --       (Opts.info (initialize <$> optional ((,) <$> (fromString <$> set)
+      --                                                <*> optional (fromString <$> source))
+      --                              Opts.<**> Opts.helper)
+      --       (Opts.progDesc "Create a new psc-package.json file"))
+      --   , Opts.command "uninstall"
+      --       (Opts.info (uninstall <$> pkg Opts.<**> Opts.helper)
+      --       (Opts.progDesc "Uninstall the named package"))
+      --   , Opts.command "install"
+      --       (Opts.info (install <$> optional pkg Opts.<**> Opts.helper)
+      --       (Opts.progDesc "Install/update the named package and add it to 'depends' if not already listed. If no package is specified, install/update all dependencies."))
+      --   , Opts.command "build"
+      --       (Opts.info (exec ["purs", "compile"]
+      --                   <$> onlyDeps "Compile only the package's dependencies"
+      --                   <*> passthroughArgs "purs compile"
+      --                   Opts.<**> Opts.helper)
+      --       (Opts.progDesc "Install dependencies and compile the current package"))
+      --   , Opts.command "repl"
+      --       (Opts.info (exec ["purs", "repl"]
+      --                   <$> onlyDeps "Load only the package's dependencies"
+      --                   <*> passthroughArgs "purs repl"
+      --                   Opts.<**> Opts.helper)
+      --       (Opts.progDesc "Open an interactive environment for PureScript"))
+      --   , Opts.command "dependencies"
+      --       (Opts.info (pure listDependencies)
+      --       (Opts.progDesc "List all (transitive) dependencies for the current package"))
+      --   , Opts.command "sources"
+      --       (Opts.info (pure listSourcePaths)
+      --       (Opts.progDesc "List all (active) source paths for dependencies"))
+      --   , Opts.command "available"
+      --       (Opts.info (listPackages <$> sorted Opts.<**> Opts.helper)
+      --       (Opts.progDesc "List all packages available in the package set"))
+      --   , Opts.command "updates"
+      --       (Opts.info (checkForUpdates <$> apply <*> applyMajor Opts.<**> Opts.helper)
+      --       (Opts.progDesc "Check all packages in the package set for new releases"))
+      --   , Opts.command "verify"
+      --       (Opts.info (verify <$>
+      --                   ((VPackage . fromString <$> pkg)
+      --                    <|> (VerifyAll <$> optional (fromString <$> after)))
+      --                   Opts.<**> Opts.helper)
+      --       (Opts.progDesc "Verify that the named package builds correctly. If no package is specified, verify that all packages in the package set build correctly."))
+      --   , Opts.command "add-from-bower"
+      --       (Opts.info (addFromBower <$> pkg Opts.<**> Opts.helper)
+      --       (Opts.progDesc "Add a package from the Bower registry to the package set. This requires Bower to be installed on your system."))
+      --   , Opts.command "format"
+      --       (Opts.info (pure formatPackageFile)
+      --       (Opts.progDesc "Format the packages.json file for consistency"))
+      --   , Opts.command "new-install"
+      --       (Opts.info (pure Client.install)
+      --       (Opts.progDesc "Install all packages available in the package set."))
+      --   , Opts.command "new-install-all"
+      --       (Opts.info (pure Client.installAll)
+      --       (Opts.progDesc "Install all packages available in the package set."))
+      --   , Opts.command "install-all"
+      --       (Opts.info (pure (runCmd installAll))
+      --       (Opts.progDesc "Install all packages available in the package set."))
+      --   , Opts.command "new-sources"
+      --       (Opts.info (pure Client.sources)
+      --       (Opts.progDesc "Format the packages.json file for consistency"))
+      --   , Opts.command "lint"
+      --       (Opts.info (pure (runCmd lint))
+      --       (Opts.progDesc "Format the packages.json file for consistency"))
+      --   , Opts.command "dhall"
+      --       (Opts.info (pure readDhallPackageSet)
+      --       (Opts.progDesc "Format the packages.json file for consistency"))
+      --   ]
+      -- where
+      --   pkg = Opts.strArgument $
+      --        Opts.metavar "PACKAGE"
+      --     <> Opts.help "The name of the package to install"
 
-        applyMajor = Opts.switch $
-             Opts.long "apply-breaking"
-          <> Opts.help "Apply all major package updates"
+      --   source = Opts.strOption $
+      --        Opts.long "source"
+      --     <> Opts.help "The Git repository for the package set"
 
-        onlyDeps help = Opts.switch $
-             Opts.long "only-dependencies"
-          <> Opts.short 'd'
-          <> Opts.help help
+      --   set = Opts.strOption $
+      --        Opts.long "set"
+      --     <> Opts.help "The package set tag name"
 
-        passthroughArgs cmd = many $ Opts.strArgument $
-             Opts.help ("Options passed through to " <> cmd <> "; use -- to separate")
-          <> Opts.metavar ("`" <> cmd <> "`" <> "-options")
+      --   apply = Opts.switch $
+      --        Opts.long "apply"
+      --     <> Opts.help "Apply all minor package updates"
 
-        sorted = Opts.switch $
-             Opts.long "sort"
-          <> Opts.short 's'
-          <> Opts.help "Sort packages in dependency order"
+      --   applyMajor = Opts.switch $
+      --        Opts.long "apply-breaking"
+      --     <> Opts.help "Apply all major package updates"
 
-        after = Opts.strOption $
-             Opts.long "after"
-          <> Opts.help "Skip packages before this package during verification"
+      --   sorted = Opts.switch $
+      --        Opts.long "sort"
+      --     <> Opts.short 's'
+      --     <> Opts.help "Sort packages in dependency order"
+
+      --   after = Opts.strOption $
+      --        Opts.long "after"
+      --     <> Opts.help "Skip packages before this package during verification"

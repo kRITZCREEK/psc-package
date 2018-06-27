@@ -11,13 +11,14 @@ import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import Package (Package)
 import qualified Package as Package
-import PackageSet (PackageSet)
+import PackageSet (PackageSet, Metadata(..))
 import qualified PackageSet as PackageSet
 
 import Types (PackageName(..))
 
 data PackageConfig = PackageConfig
   { packageSet   :: [Package]
+  , metadata :: Maybe Metadata
   , dependencies :: [PackageName]
   } deriving (Show)
 
@@ -36,6 +37,7 @@ interpret :: Dhall.Type PackageConfig
 interpret = Dhall.record
   (PackageConfig
     <$> Dhall.field "packageSet" (Dhall.list Package.interpret)
+    <*> pure Nothing
     <*> fmap (map PackageName) (Dhall.field "dependencies" (Dhall.list Dhall.strictText)))
 
 -- for GHCI purposes

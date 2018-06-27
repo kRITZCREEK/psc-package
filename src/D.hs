@@ -21,19 +21,35 @@ import Data.Text.Prettyprint.Doc.Render.Text (renderStrict)
 
 import Package (Package(..))
 import qualified Package as Package
+import PackageConfig (PackageConfig(..))
 import PackageSet (PackageSet)
 import Types
 
 import qualified Data.HashMap.Strict.InsOrd as IOHM
 
+printPackageConfig :: PackageConfig -> Text
+printPackageConfig = printExpr . mkConfig
+
 printPackageSet :: PackageSet -> Text
 printPackageSet = printExpr . mkPackageSet
 
-mkPackageSet :: PackageSet -> Expr s Path
-mkPackageSet pkgSet =
-  ListLit Nothing (Seq.fromList $ map (mkPackage . uncurry Package.mergeInfo) $ Map.toAscList pkgSet)
+mkConfig :: PackageConfig -> Expr s Dhall.Import
+mkConfig pkgCfg =
+  RecordLit
+    (IOHM.fromList
+      [ ("packageSet", mkPackageSet' (PackageConfig.packageSet pkgCfg))
+      , ("dependencies", listLit [])
+      , ("metadata", listLit [])
+      ])
 
-mkPackage :: Package -> Expr s Path
+mkPackageSet :: PackageSet -> Expr s Dhall.Import
+mkPackageSet pkgSet =
+  mkPackageSet' (map (uncurry Package.mergeInfo) (Map.toAscList pkgSet))
+
+mkPackageSet' :: [Package] -> Expr s Dhall.Import
+mkPackageSet' = ListLit Nothing . Seq.fromList . map mkPackage
+
+mkPackage :: Package -> Expr s Dhall.Import
 mkPackage Package{..} =
   RecordLit
     (IOHM.fromList
@@ -51,7 +67,7 @@ textLit s = TextLit (Chunks [] (Builder.fromText s))
 
 opts :: Pretty.LayoutOptions
 opts =
-    Pretty.defaultLayoutOptions { Pretty.layoutPageWidth = Pretty.AvailablePerLine 80 1.0 }
+  Pretty.defaultLayoutOptions { Pretty.layoutPageWidth = Pretty.AvailablePerLine 80 1.0 }
 
-printExpr :: Expr s Path -> Text
+printExpr :: Expr s Dhall.Import -> Text
 printExpr = renderStrict . Pretty.layoutSmart opts . prettyExpr
