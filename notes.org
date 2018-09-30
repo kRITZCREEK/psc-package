@@ -1,0 +1,86 @@
+* Metadata format
+
+{ moduleMap : List { package : PackageName, modules : List ModuleName }
+, compiler : Text
+, updateUrl : Optional (Text (Regex))
+}
+
+** compiler
+   1. Fixed version -> "0.11.7", "0.12.0"
+   2. Allow range syntax -> "> 0.12.0", "0.12.x" or something
+
+** moduleMap
+   If we made moduleMap a record from packageName -> List Dependency we could
+   typecheck it against the packageSet (If we also made that a record)
+
+** updateUrl
+
+   The idea is that we might want to allow a package set curator to release
+   updates to a package set. (This whole thing relies on git, not sure if we can
+   still make this work with packagesets as Dhall expressions)
+
+   One possibility would be to specify a REGEX here that matches the tags that
+   make up a series of package-sets, eg: "0.12.0[-]?*"
+
+   The client could then fetch all the tags, filter by REGEX and suggest the
+   latest matching one.
+
+
+* Updating in a PackageSet
+
+** Tagged git repos
+   Check if there are any newer tags that look like release versions -> Suggest update
+
+** Branch reference git repos
+   Nothing we can do here?
+
+** Commit reference git repos
+   Check if there are newer commits on the master branch?
+
+
+* Updating from the client
+
+** Check if there is a newer version of the current packageSet
+   This would only work if an updateUrl was specified in the metadata, AND the
+   package set was specified as a Git resource.
+
+   type PackageSet = < Raw : List Package | Git { repo : Text, ref : Text, overrides : List Package }
+
+
+* Diffing two package sets
+
+  If a package set is just a Dhall expression, it should be easy enough to load
+  up two different expressions, convert them into a PackageSet and construct a
+  diff, for the user.
+
+  Diffing from the creation of the packageSet should diff the current local
+  packageSet against <expr>, while diffing from the client should highlight the
+  differences to the currently selected dependencies.
+
+  I think it would actually be best if it didn't even show non-depended packages
+  unless you specify a flag (--verbose?)
+
+
+* Client Dhall caching
+
+  The first time a packageSet expression is evaluated, we should cache it
+  locally and never reevaluate it unless the user specifically asks us to do so.
+  We'll also need to store the unevaluated dhall expression/hash it, so we can
+  detect changes in user intent. I think the best strategy would be store it in
+
+  .psc-package/.set/package.dhall <- fully evaluated
+  .psc-package/.set/packageExpr.dhall <- unevaluated
+
+  We could also consider storing that expression as a lock file? (Would maybe be
+  misleading, given that a package reference can point to a mutable location)
+
+
+* Set Dhall caching?
+  Never imo
+
+
+* Set infer
+** Download/Clone all the packages specified in packagesInput.dhall
+** Build a ModuleMap by (incrementally!) parsing all source headers
+** Infer dependencies from that ModuleMap
+** Write inferred dependencies and ModuleMap to packageSet file
